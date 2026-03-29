@@ -1,372 +1,494 @@
-cat > static/index.html << 'EOF'
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GST Invoice Extractor</title>
+    <title>Indian GST Invoice Extractor | AI-Powered OCR</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', sans-serif; 
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
         }
+
         .container {
-            max-width: 900px;
+            max-width: 1200px;
             margin: 0 auto;
         }
+
         .header {
             text-align: center;
             color: white;
-            padding: 30px 0;
+            margin-bottom: 40px;
         }
-        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
-        .header p { font-size: 1.1em; opacity: 0.9; }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
         .card {
             background: white;
             border-radius: 20px;
-            padding: 40px;
-            margin: 20px 0;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            margin-bottom: 30px;
         }
-        .upload-zone {
+
+        .upload-area {
             border: 3px dashed #667eea;
             border-radius: 15px;
-            padding: 60px 20px;
+            padding: 50px;
             text-align: center;
             cursor: pointer;
-            transition: all 0.3s;
+            transition: all 0.3s ease;
             background: #f8f9ff;
         }
-        .upload-zone:hover { 
+
+        .upload-area:hover {
             border-color: #764ba2;
-            background: #f0f0ff;
+            background: #f0f2ff;
         }
-        .upload-zone.dragover {
-            border-color: #764ba2;
-            background: #e8e8ff;
-            transform: scale(1.02);
+
+        .upload-area.drag-over {
+            border-color: #00d4ff;
+            background: #e8f4ff;
         }
-        .upload-icon { font-size: 4em; margin-bottom: 15px; }
-        .upload-zone h3 { color: #333; margin-bottom: 10px; }
-        .upload-zone p { color: #666; font-size: 0.9em; }
-        #fileInput { display: none; }
-        .btn {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .upload-text {
+            font-size: 18px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            font-size: 14px;
+            color: #999;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        .preview-area {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .preview-card {
+            background: #f8f9ff;
+            border-radius: 10px;
+            padding: 15px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .preview-icon {
+            font-size: 32px;
+        }
+
+        .preview-info {
+            flex: 1;
+        }
+
+        .preview-filename {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .preview-size {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .remove-file {
+            background: #ff4757;
             color: white;
             border: none;
-            padding: 15px 40px;
-            border-radius: 50px;
-            font-size: 1.1em;
+            padding: 5px 15px;
+            border-radius: 5px;
             cursor: pointer;
+        }
+
+        .extract-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
             margin-top: 20px;
             transition: transform 0.2s;
-            width: 100%;
         }
-        .btn:hover { transform: translateY(-2px); }
-        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-        .preview {
+
+        .extract-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .extract-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
             margin-top: 20px;
-            text-align: center;
-            display: none;
         }
-        .preview img {
-            max-width: 100%;
-            max-height: 300px;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        }
-        .filename {
-            margin-top: 10px;
-            color: #667eea;
-            font-weight: bold;
-        }
-        .loader {
-            display: none;
-            text-align: center;
-            padding: 40px;
-        }
+
         .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
             width: 50px;
             height: 50px;
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid #667eea;
-            border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
+            margin: 0 auto 15px;
         }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        .results { display: none; }
-        .results h2 { 
-            color: #333; 
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #667eea;
-        }
-        .fields-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-        .field-card {
-            background: linear-gradient(135deg, #667eea22, #764ba222);
-            border-radius: 10px;
-            padding: 15px;
-            border-left: 4px solid #667eea;
-        }
-        .field-label {
-            font-size: 0.8em;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 5px;
-        }
-        .field-value {
-            font-size: 1.1em;
-            color: #333;
-            font-weight: bold;
-        }
-        .not-found { color: #999; font-style: italic; }
-        .raw-text {
-            background: #f8f9fa;
-            border-radius: 10px;
+
+        .result-area {
+            display: none;
+            background: #f8f9ff;
+            border-radius: 15px;
             padding: 20px;
-            font-family: monospace;
-            font-size: 0.85em;
-            white-space: pre-wrap;
-            max-height: 300px;
-            overflow-y: auto;
-            border: 1px solid #dee2e6;
-        }
-        .action-btns {
-            display: flex;
-            gap: 10px;
             margin-top: 20px;
         }
-        .btn-sm {
-            padding: 10px 20px;
-            border-radius: 25px;
-            border: none;
-            cursor: pointer;
-            font-size: 0.9em;
-            transition: transform 0.2s;
+
+        .result-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #667eea;
         }
-        .btn-copy { background: #28a745; color: white; }
-        .btn-json { background: #17a2b8; color: white; }
-        .btn-reset { background: #dc3545; color: white; }
-        .btn-sm:hover { transform: translateY(-2px); }
-        .confidence {
-            display: inline-block;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.85em;
-            font-weight: bold;
-            margin-bottom: 20px;
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
         }
-        .high { background: #d4edda; color: #155724; }
-        .low { background: #fff3cd; color: #856404; }
-        .toast {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #333;
+
+        .result-item {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .result-label {
+            font-size: 12px;
+            color: #999;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+
+        .result-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+            word-break: break-word;
+        }
+
+        .json-view {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 12px;
+            margin-top: 15px;
+        }
+
+        .error {
+            background: #ff4757;
             color: white;
-            padding: 15px 25px;
-            border-radius: 10px;
-            display: none;
-            animation: slideIn 0.3s ease;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
         }
-        @keyframes slideIn {
-            from { transform: translateX(100px); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .feature {
+            text-align: center;
+            padding: 20px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .feature-icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .feature-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .feature-desc {
+            font-size: 12px;
+            color: #999;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 { font-size: 1.8rem; }
+            .result-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🧾 GST Invoice Extractor</h1>
-            <p>Extract structured data from Indian GST invoices instantly</p>
+            <h1>🧾 Indian GST Invoice Extractor</h1>
+            <p>AI-Powered OCR using Google Gemini Vision API</p>
         </div>
 
         <div class="card">
-            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-                <div class="upload-icon">📄</div>
-                <h3>Drop your invoice here</h3>
-                <p>or click to browse files</p>
-              <p style="margin-top:10px; color:#999">Supports: JPG, PNG, TIFF, BMP, PDF</p>
-                <input type="file" id="fileInput" accept="image/*">
+            <div class="upload-area" id="upload-area">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">Drag & drop your invoice here</div>
+                <div class="upload-hint">or click to browse</div>
+                <input type="file" id="file-input" accept=".pdf,.jpg,.jpeg,.png,.tiff,.bmp,.webp">
             </div>
 
-            <div class="preview" id="preview">
-                <img id="previewImg" src="" alt="Preview">
-                <div class="filename" id="filename"></div>
+            <div class="preview-area" id="preview-area">
+                <div class="preview-card">
+                    <div class="preview-icon" id="preview-icon">📄</div>
+                    <div class="preview-info">
+                        <div class="preview-filename" id="preview-filename">invoice.pdf</div>
+                        <div class="preview-size" id="preview-size">0 KB</div>
+                    </div>
+                    <button class="remove-file" id="remove-file">Remove</button>
+                </div>
             </div>
 
-            <button class="btn" id="extractBtn" onclick="extractInvoice()" disabled>
-                🔍 Extract Invoice Data
-            </button>
+            <button class="extract-btn" id="extract-btn" disabled>Extract GST Data →</button>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <div>Processing with Gemini AI...</div>
+                <div style="font-size: 12px; margin-top: 10px;">This may take a few seconds</div>
+            </div>
+
+            <div class="result-area" id="result-area">
+                <div class="result-title">📊 Extracted Invoice Data</div>
+                <div class="result-grid" id="result-grid"></div>
+                <div class="json-view" id="json-view"></div>
+            </div>
         </div>
 
-        <div class="card loader" id="loader">
-            <div class="spinner"></div>
-            <h3 style="color:#667eea">Extracting invoice data...</h3>
-            <p style="color:#666; margin-top:10px">Running OCR and GST field detection</p>
-        </div>
-
-        <div class="card results" id="results">
-            <h2>📊 Extracted Results</h2>
-            
-            <div id="confidence"></div>
-
-            <div class="fields-grid" id="fieldsGrid"></div>
-
-            <h3 style="margin-bottom:15px; color:#333">📝 Raw Extracted Text</h3>
-            <div class="raw-text" id="rawText"></div>
-
-            <div class="action-btns">
-                <button class="btn-sm btn-copy" onclick="copyJSON()">📋 Copy JSON</button>
-                <button class="btn-sm btn-json" onclick="downloadJSON()">⬇️ Download JSON</button>
-                <button class="btn-sm btn-reset" onclick="reset()">🔄 Extract Another</button>
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">🔍</div>
+                <div class="feature-title">AI-Powered</div>
+                <div class="feature-desc">Google Gemini Vision API</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">📄</div>
+                <div class="feature-title">Multiple Formats</div>
+                <div class="feature-desc">PDF, JPG, PNG, TIFF, BMP</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-title">Fast Processing</div>
+                <div class="feature-desc">&lt; 5 seconds per invoice</div>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🔐</div>
+                <div class="feature-title">Secure</div>
+                <div class="feature-desc">No data storage</div>
             </div>
         </div>
     </div>
 
-    <div class="toast" id="toast"></div>
-
     <script>
-        let extractedData = null;
+        const uploadArea = document.getElementById('upload-area');
+        const fileInput = document.getElementById('file-input');
+        const previewArea = document.getElementById('preview-area');
+        const previewFilename = document.getElementById('preview-filename');
+        const previewSize = document.getElementById('preview-size');
+        const removeFileBtn = document.getElementById('remove-file');
+        const extractBtn = document.getElementById('extract-btn');
+        const loading = document.getElementById('loading');
+        const resultArea = document.getElementById('result-area');
+        const resultGrid = document.getElementById('result-grid');
+        const jsonView = document.getElementById('json-view');
 
-        const uploadZone = document.getElementById('uploadZone');
-        const fileInput = document.getElementById('fileInput');
+        let selectedFile = null;
 
-        uploadZone.addEventListener('dragover', (e) => {
+        // Upload area click
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
-            uploadZone.classList.add('dragover');
+            uploadArea.classList.add('drag-over');
         });
 
-        uploadZone.addEventListener('dragleave', () => {
-            uploadZone.classList.remove('dragover');
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('drag-over');
         });
 
-        uploadZone.addEventListener('drop', (e) => {
+        uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
-            uploadZone.classList.remove('dragover');
-            const file = e.dataTransfer.files[0];
-            if (file) handleFile(file);
+            uploadArea.classList.remove('drag-over');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
         });
 
+        // File input change
         fileInput.addEventListener('change', (e) => {
-            if (e.target.files[0]) handleFile(e.target.files[0]);
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
         });
 
+        // Handle file selection
         function handleFile(file) {
-            document.getElementById('filename').textContent = file.name;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                document.getElementById('previewImg').src = e.target.result;
-                document.getElementById('preview').style.display = 'block';
-            };
-            reader.readAsDataURL(file);
-            document.getElementById('extractBtn').disabled = false;
+            const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/tiff', 'image/bmp', 'image/webp'];
+            if (!validTypes.includes(file.type)) {
+                alert('Invalid file type. Please upload PDF, JPG, PNG, TIFF, BMP, or WEBP.');
+                return;
+            }
+
+            if (file.size > 10 * 1024 * 1024) {
+                alert('File too large. Max 10MB.');
+                return;
+            }
+
+            selectedFile = file;
+            previewFilename.textContent = file.name;
+            previewSize.textContent = (file.size / 1024).toFixed(2) + ' KB';
+            previewArea.style.display = 'block';
+            extractBtn.disabled = false;
+
+            // Set icon based on type
+            const icon = document.getElementById('preview-icon');
+            if (file.type === 'application/pdf') {
+                icon.textContent = '📕';
+            } else {
+                icon.textContent = '🖼️';
+            }
         }
 
-        async function extractInvoice() {
-            const file = fileInput.files[0];
-            if (!file) { showToast('Please select a file!'); return; }
+        // Remove file
+        removeFileBtn.addEventListener('click', () => {
+            selectedFile = null;
+            previewArea.style.display = 'none';
+            extractBtn.disabled = true;
+            resultArea.style.display = 'none';
+            fileInput.value = '';
+        });
 
-            document.getElementById('loader').style.display = 'block';
-            document.getElementById('results').style.display = 'none';
-            document.getElementById('extractBtn').disabled = true;
+        // Extract data
+        extractBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
 
             const formData = new FormData();
-            formData.append('file', file);
+            formData.append('file', selectedFile);
+
+            extractBtn.disabled = true;
+            loading.style.display = 'block';
+            resultArea.style.display = 'none';
 
             try {
                 const response = await fetch('/extract', {
                     method: 'POST',
                     body: formData
                 });
+
                 const data = await response.json();
-                extractedData = data;
-                displayResults(data);
-            } catch (err) {
-                showToast('Error: ' + err.message);
+
+                if (data.success) {
+                    displayResults(data.extracted_data);
+                    if (data.cached) {
+                        console.log('Result served from cache');
+                    }
+                } else {
+                    throw new Error(data.error || 'Extraction failed');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
             } finally {
-                document.getElementById('loader').style.display = 'none';
-                document.getElementById('extractBtn').disabled = false;
+                extractBtn.disabled = false;
+                loading.style.display = 'none';
             }
-        }
+        });
 
+        // Display results
         function displayResults(data) {
-            const conf = data.confidence;
-            document.getElementById('confidence').innerHTML = 
-                `<span class="confidence ${conf}">
-                    ${conf === 'high' ? '✅ High Confidence' : '⚠️ Low Confidence — try a clearer image'}
-                </span>`;
+            const fields = [
+                { label: 'GSTIN', key: 'gstin', icon: '🏢' },
+                { label: 'Invoice Number', key: 'invoice_number', icon: '📄' },
+                { label: 'Invoice Date', key: 'invoice_date', icon: '📅' },
+                { label: 'Vendor Name', key: 'vendor_name', icon: '🏭' },
+                { label: 'Vendor GSTIN', key: 'vendor_gstin', icon: '🔑' },
+                { label: 'Buyer Name', key: 'buyer_name', icon: '👤' },
+                { label: 'Buyer GSTIN', key: 'buyer_gstin', icon: '🔑' },
+                { label: 'Place of Supply', key: 'place_of_supply', icon: '📍' },
+                { label: 'Taxable Amount', key: 'taxable_amount', icon: '💰', format: 'currency' },
+                { label: 'CGST', key: 'cgst', icon: '🏛️', format: 'currency' },
+                { label: 'SGST', key: 'sgst', icon: '🏛️', format: 'currency' },
+                { label: 'IGST', key: 'igst', icon: '🏛️', format: 'currency' },
+                { label: 'Cess', key: 'cess', icon: '💰', format: 'currency' },
+                { label: 'Total Amount', key: 'total_amount', icon: '💰', format: 'currency' },
+                { label: 'Invoice Type', key: 'invoice_type', icon: '📋' }
+            ];
 
-            const fields = {
-                'GSTIN': data.extracted_fields?.gstin,
-                'Invoice Number': data.extracted_fields?.invoice_number,
-                'Date': data.extracted_fields?.date,
-                'Total Amount': data.extracted_fields?.total_amount,
-                'CGST': data.extracted_fields?.cgst,
-                'SGST': data.extracted_fields?.sgst
-            };
-
-            const grid = document.getElementById('fieldsGrid');
-            grid.innerHTML = '';
-            for (const [label, value] of Object.entries(fields)) {
-                grid.innerHTML += `
-                    <div class="field-card">
-                        <div class="field-label">${label}</div>
-                        <div class="field-value ${value ? '' : 'not-found'}">
-                            ${value || 'Not found'}
-                        </div>
-                    </div>`;
+            resultGrid.innerHTML = '';
+            for (const field of fields) {
+                const value = data[field.key];
+                if (value !== null && value !== undefined && value !== '') {
+                    const displayValue = field.format === 'currency' && typeof value === 'number' 
+                        ? `₹${value.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                        : value;
+                    
+                    const item = document.createElement('div');
+                    item.className = 'result-item';
+                    item.innerHTML = `
+                        <div class="result-label">${field.icon} ${field.label}</div>
+                        <div class="result-value">${displayValue}</div>
+                    `;
+                    resultGrid.appendChild(item);
+                }
             }
 
-            document.getElementById('rawText').textContent = data.raw_text;
-            document.getElementById('results').style.display = 'block';
-        }
-
-        function copyJSON() {
-            navigator.clipboard.writeText(JSON.stringify(extractedData, null, 2));
-            showToast('✅ Copied to clipboard!');
-        }
-
-        function downloadJSON() {
-            const blob = new Blob([JSON.stringify(extractedData, null, 2)], 
-                {type: 'application/json'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'invoice-data.json';
-            a.click();
-            showToast('✅ Downloaded!');
-        }
-
-        function reset() {
-            document.getElementById('results').style.display = 'none';
-            document.getElementById('preview').style.display = 'none';
-            document.getElementById('extractBtn').disabled = true;
-            fileInput.value = '';
-            extractedData = null;
-        }
-
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.textContent = msg;
-            toast.style.display = 'block';
-            setTimeout(() => toast.style.display = 'none', 3000);
+            jsonView.textContent = JSON.stringify(data, null, 2);
+            resultArea.style.display = 'block';
         }
     </script>
 </body>
 </html>
-EOF
