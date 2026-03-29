@@ -1,34 +1,372 @@
+cat > static/index.html << 'EOF'
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Indian GST Invoice Extractor</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GST Invoice Extractor</title>
     <style>
-        body { font-family: Arial; max-width: 800px; margin: 50px auto; padding: 20px; }
-        h1 { color: #2c3e50; }
-        .upload-box { border: 2px dashed #3498db; padding: 40px; text-align: center; border-radius: 10px; }
-        button { background: #3498db; color: white; padding: 10px 30px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
-        #result { margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px; white-space: pre-wrap; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            color: white;
+            padding: 30px 0;
+        }
+        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .header p { font-size: 1.1em; opacity: 0.9; }
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            margin: 20px 0;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+        .upload-zone {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 60px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #f8f9ff;
+        }
+        .upload-zone:hover { 
+            border-color: #764ba2;
+            background: #f0f0ff;
+        }
+        .upload-zone.dragover {
+            border-color: #764ba2;
+            background: #e8e8ff;
+            transform: scale(1.02);
+        }
+        .upload-icon { font-size: 4em; margin-bottom: 15px; }
+        .upload-zone h3 { color: #333; margin-bottom: 10px; }
+        .upload-zone p { color: #666; font-size: 0.9em; }
+        #fileInput { display: none; }
+        .btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 50px;
+            font-size: 1.1em;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: transform 0.2s;
+            width: 100%;
+        }
+        .btn:hover { transform: translateY(-2px); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .preview {
+            margin-top: 20px;
+            text-align: center;
+            display: none;
+        }
+        .preview img {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .filename {
+            margin-top: 10px;
+            color: #667eea;
+            font-weight: bold;
+        }
+        .loader {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .results { display: none; }
+        .results h2 { 
+            color: #333; 
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+        .fields-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .field-card {
+            background: linear-gradient(135deg, #667eea22, #764ba222);
+            border-radius: 10px;
+            padding: 15px;
+            border-left: 4px solid #667eea;
+        }
+        .field-label {
+            font-size: 0.8em;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 5px;
+        }
+        .field-value {
+            font-size: 1.1em;
+            color: #333;
+            font-weight: bold;
+        }
+        .not-found { color: #999; font-style: italic; }
+        .raw-text {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            font-family: monospace;
+            font-size: 0.85em;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+        }
+        .action-btns {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .btn-sm {
+            padding: 10px 20px;
+            border-radius: 25px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: transform 0.2s;
+        }
+        .btn-copy { background: #28a745; color: white; }
+        .btn-json { background: #17a2b8; color: white; }
+        .btn-reset { background: #dc3545; color: white; }
+        .btn-sm:hover { transform: translateY(-2px); }
+        .confidence {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .high { background: #d4edda; color: #155724; }
+        .low { background: #fff3cd; color: #856404; }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #333;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            display: none;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
     </style>
 </head>
 <body>
-    <h1>🧾 Indian GST Invoice Extractor</h1>
-    <p>Upload any GST invoice image and extract text instantly!</p>
-    <div class="upload-box">
-        <input type="file" id="fileInput" accept="image/*,.pdf"><br><br>
-        <button onclick="extractInvoice()">Extract Invoice Data</button>
+    <div class="container">
+        <div class="header">
+            <h1>🧾 GST Invoice Extractor</h1>
+            <p>Extract structured data from Indian GST invoices instantly</p>
+        </div>
+
+        <div class="card">
+            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                <div class="upload-icon">📄</div>
+                <h3>Drop your invoice here</h3>
+                <p>or click to browse files</p>
+                <p style="margin-top:10px; color:#999">Supports: JPG, PNG, TIFF, BMP</p>
+                <input type="file" id="fileInput" accept="image/*">
+            </div>
+
+            <div class="preview" id="preview">
+                <img id="previewImg" src="" alt="Preview">
+                <div class="filename" id="filename"></div>
+            </div>
+
+            <button class="btn" id="extractBtn" onclick="extractInvoice()" disabled>
+                🔍 Extract Invoice Data
+            </button>
+        </div>
+
+        <div class="card loader" id="loader">
+            <div class="spinner"></div>
+            <h3 style="color:#667eea">Extracting invoice data...</h3>
+            <p style="color:#666; margin-top:10px">Running OCR and GST field detection</p>
+        </div>
+
+        <div class="card results" id="results">
+            <h2>📊 Extracted Results</h2>
+            
+            <div id="confidence"></div>
+
+            <div class="fields-grid" id="fieldsGrid"></div>
+
+            <h3 style="margin-bottom:15px; color:#333">📝 Raw Extracted Text</h3>
+            <div class="raw-text" id="rawText"></div>
+
+            <div class="action-btns">
+                <button class="btn-sm btn-copy" onclick="copyJSON()">📋 Copy JSON</button>
+                <button class="btn-sm btn-json" onclick="downloadJSON()">⬇️ Download JSON</button>
+                <button class="btn-sm btn-reset" onclick="reset()">🔄 Extract Another</button>
+            </div>
+        </div>
     </div>
-    <div id="result"></div>
+
+    <div class="toast" id="toast"></div>
+
     <script>
+        let extractedData = null;
+
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) handleFile(file);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) handleFile(e.target.files[0]);
+        });
+
+        function handleFile(file) {
+            document.getElementById('filename').textContent = file.name;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                document.getElementById('previewImg').src = e.target.result;
+                document.getElementById('preview').style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+            document.getElementById('extractBtn').disabled = false;
+        }
+
         async function extractInvoice() {
-            const file = document.getElementById('fileInput').files[0];
-            if (!file) { alert('Please select a file!'); return; }
-            document.getElementById('result').innerHTML = '⏳ Extracting...';
+            const file = fileInput.files[0];
+            if (!file) { showToast('Please select a file!'); return; }
+
+            document.getElementById('loader').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('extractBtn').disabled = true;
+
             const formData = new FormData();
             formData.append('file', file);
-            const response = await fetch('/extract', { method: 'POST', body: formData });
-            const data = await response.json();
-            document.getElementById('result').innerHTML = '✅ Extracted Text:\n\n' + data.extracted_text;
+
+            try {
+                const response = await fetch('/extract', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                extractedData = data;
+                displayResults(data);
+            } catch (err) {
+                showToast('Error: ' + err.message);
+            } finally {
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('extractBtn').disabled = false;
+            }
+        }
+
+        function displayResults(data) {
+            const conf = data.confidence;
+            document.getElementById('confidence').innerHTML = 
+                `<span class="confidence ${conf}">
+                    ${conf === 'high' ? '✅ High Confidence' : '⚠️ Low Confidence — try a clearer image'}
+                </span>`;
+
+            const fields = {
+                'GSTIN': data.extracted_fields?.gstin,
+                'Invoice Number': data.extracted_fields?.invoice_number,
+                'Date': data.extracted_fields?.date,
+                'Total Amount': data.extracted_fields?.total_amount,
+                'CGST': data.extracted_fields?.cgst,
+                'SGST': data.extracted_fields?.sgst
+            };
+
+            const grid = document.getElementById('fieldsGrid');
+            grid.innerHTML = '';
+            for (const [label, value] of Object.entries(fields)) {
+                grid.innerHTML += `
+                    <div class="field-card">
+                        <div class="field-label">${label}</div>
+                        <div class="field-value ${value ? '' : 'not-found'}">
+                            ${value || 'Not found'}
+                        </div>
+                    </div>`;
+            }
+
+            document.getElementById('rawText').textContent = data.raw_text;
+            document.getElementById('results').style.display = 'block';
+        }
+
+        function copyJSON() {
+            navigator.clipboard.writeText(JSON.stringify(extractedData, null, 2));
+            showToast('✅ Copied to clipboard!');
+        }
+
+        function downloadJSON() {
+            const blob = new Blob([JSON.stringify(extractedData, null, 2)], 
+                {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'invoice-data.json';
+            a.click();
+            showToast('✅ Downloaded!');
+        }
+
+        function reset() {
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('preview').style.display = 'none';
+            document.getElementById('extractBtn').disabled = true;
+            fileInput.value = '';
+            extractedData = null;
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 3000);
         }
     </script>
 </body>
 </html>
+EOF
