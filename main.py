@@ -20,8 +20,7 @@ import io
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 MAX_FILE_SIZE = 10 * 1024 * 1024
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.webp', '.pdf'}
-MODEL_NAME = "gemini-2.5-flash-preview"
-
+MODEL_NAME = "gemini-2.0-flash"
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 app = FastAPI(
