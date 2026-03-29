@@ -1,28 +1,18 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from PIL import Image, ImageEnhance, ImageFilter
-import easyocr
+from PIL import Image
+import anthropic
+import base64
 import io
 import os
 import re
 
-app = FastAPI(
-    title="Indian GST Invoice Extractor",
-    version="2.0"
-)
-
+app = FastAPI(title="Indian GST Invoice Extractor", version="3.0")
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-reader = easyocr.Reader(['en'], gpu=False)
-
-def preprocess_image(image):
-    image = image.convert('L')
-    enhancer = ImageEnhance.Contrast(image)
-    image = enhancer.enhance(2.0)
-    image = image.filter(ImageFilter.SHARPEN)
-    return image
+client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 def extract_gst_fields(text):
     fields = {}
@@ -55,10 +45,36 @@ async def extract_invoice(file: UploadFile = File(...)):
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
-        processed = preprocess_image(image)
-        result = reader.readtext(processed)
-        text = ' '.join([r[1] for r in result])
+        
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        img_base64 = base64.b64encode(buffered.getvalue()).decode()
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": img_base64
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": "Extract all text from this Indian GST invoice. Return the raw text exactly as seen."
+                    }
+                ]
+            }]
+        )
+
+        text = message.content[0].text
         gst_fields = extract_gst_fields(text)
+
         return {
             "status": "success",
             "filename": file.filename,
@@ -71,4 +87,25 @@ async def extract_invoice(file: UploadFile = File(...)):
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "version": "2.0"}
+    return {"status": "healthy", "version": "3.0"}
+```
+
+---
+
+**Add API key in Render:**
+```
+render.com → invoice-api → Environment
+Add:
+Key: ANTHROPIC_API_KEY
+Value: your-api-key-here
+Save
+```
+
+---
+
+**Get your Claude API key:**
+```
+console.anthropic.com
+→ API Keys
+→ Create Key
+→ Copy
