@@ -5,4 +5,3 @@ python-multipart
 google-generativeai
 slowapi
 python-dotenv
-python-magic-bin
