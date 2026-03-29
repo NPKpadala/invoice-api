@@ -45,11 +45,9 @@ async def extract_invoice(file: UploadFile = File(...)):
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
-        
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
         img_base64 = base64.b64encode(buffered.getvalue()).decode()
-
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=1000,
@@ -71,10 +69,8 @@ async def extract_invoice(file: UploadFile = File(...)):
                 ]
             }]
         )
-
         text = message.content[0].text
         gst_fields = extract_gst_fields(text)
-
         return {
             "status": "success",
             "filename": file.filename,
@@ -88,24 +84,3 @@ async def extract_invoice(file: UploadFile = File(...)):
 @app.get("/health")
 def health():
     return {"status": "healthy", "version": "3.0"}
-```
-
----
-
-**Add API key in Render:**
-```
-render.com → invoice-api → Environment
-Add:
-Key: ANTHROPIC_API_KEY
-Value: your-api-key-here
-Save
-```
-
----
-
-**Get your Claude API key:**
-```
-console.anthropic.com
-→ API Keys
-→ Create Key
-→ Copy
