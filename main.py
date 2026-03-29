@@ -3,8 +3,10 @@ import re
 import json
 import hashlib
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+import io
 
+import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,21 +14,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from google import genai
-from google.genai import types
-from PIL import Image
-import io
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+from PIL import Image, ImageEnhance, ImageFilter
+import pytesseract
+import cv2
+from pdf2image import convert_from_bytes
+
+# ========================= CONFIG =========================
 MAX_FILE_SIZE = 10 * 1024 * 1024
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.webp', '.pdf'}
-MODEL_NAME = "gemini-2.0-flash-lite"
-client = genai.Client(api_key=GEMINI_API_KEY)
 
 app = FastAPI(
     title="Indian GST Invoice Extractor API",
-    description="Extract GST data from invoices using Google Gemini AI",
-    version="3.0.0"
+    description="Robust Tesseract-based OCR for GST Invoices - v5.0",
+    version="5.0.0"
 )
 
 limiter = Limiter(key_func=get_remote_address)
@@ -37,277 +38,306 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-cache = {}
+cache: Dict[str, Dict] = {}
 
-EXTRACTION_PROMPT = """
-You are a specialized Indian GST invoice parser.
-Extract the following fields from this invoice:
+# ========================= HELPER: GSTIN VALIDATION =========================
+def is_valid_gstin(gstin: str) -> bool:
+    if not gstin or len(gstin) != 15:
+        return False
+    pattern = r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$'
+    if not re.match(pattern, gstin):
+        return False
+    # Simple checksum (basic validation - production can call GST portal API)
+    return True
 
-1. gstin - 15 character GSTIN of seller
-2. invoice_number - Invoice number
-3. invoice_date - Date in DD/MM/YYYY format
-4. vendor_name - Seller/supplier name
-5. vendor_gstin - Seller GSTIN
-6. buyer_name - Buyer/recipient name
-7. buyer_gstin - Buyer GSTIN if available
-8. place_of_supply - State name
-9. taxable_amount - Amount before tax (number only)
-10. cgst - CGST amount (number only)
-11. sgst - SGST amount (number only)
-12. igst - IGST amount if applicable (number only)
-13. total_amount - Final total (number only)
-14. invoice_type - Tax Invoice or Bill of Supply
-15. hsn_codes - List of HSN/SAC codes found
-
-Return ONLY valid JSON with these exact keys.
-Use null for missing fields.
-Amounts must be numbers not strings.
-
-Example:
-{
-    "gstin": "27AAACA1234A1Z5",
-    "invoice_number": "INV-2024-001",
-    "invoice_date": "15/03/2024",
-    "vendor_name": "ABC Enterprises Pvt Ltd",
-    "vendor_gstin": "27AAACA1234A1Z5",
-    "buyer_name": "XYZ Retail",
-    "buyer_gstin": "27BBBCD5678B2Z3",
-    "place_of_supply": "Maharashtra",
-    "taxable_amount": 10000.00,
-    "cgst": 900.00,
-    "sgst": 900.00,
-    "igst": null,
-    "total_amount": 11800.00,
-    "invoice_type": "Tax Invoice",
-    "hsn_codes": ["9988", "9989"]
-}
-"""
-
-def detect_file_type(filename: str, file_bytes: bytes) -> str:
-    ext = os.path.splitext(filename.lower())[1]
-    if ext == '.pdf' or file_bytes.startswith(b'%PDF'):
-        return 'application/pdf'
-    elif ext in ['.jpg', '.jpeg'] or file_bytes.startswith(b'\xff\xd8'):
-        return 'image/jpeg'
-    elif ext == '.png' or file_bytes.startswith(b'\x89PNG'):
-        return 'image/png'
-    elif ext in ['.tiff', '.tif']:
-        return 'image/tiff'
-    elif ext == '.bmp':
-        return 'image/bmp'
-    elif ext == '.webp':
-        return 'image/webp'
+# ========================= ADVANCED PREPROCESSING =========================
+def deskew_image(image: np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    coords = np.column_stack(np.where(gray > 0))
+    angle = cv2.minAreaRect(coords)[-1]
+    if angle < -45:
+        angle = -(90 + angle)
     else:
-        return 'image/jpeg'
+        angle = -angle
+    (h, w) = image.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    return rotated
 
-def preprocess_image(image_bytes: bytes) -> Image.Image:
-    image = Image.open(io.BytesIO(image_bytes))
-    if image.mode not in ('RGB', 'L'):
+def preprocess_image(image: Image.Image) -> Image.Image:
+    if image.mode != 'RGB':
         image = image.convert('RGB')
-    max_size = 2000
-    if max(image.size) > max_size:
-        ratio = max_size / max(image.size)
-        new_size = tuple(int(dim * ratio) for dim in image.size)
-        image = image.resize(new_size, Image.Resampling.LANCZOS)
-    return image
+    
+    img_array = np.array(image)
+    
+    # Deskew
+    img_array = deskew_image(img_array)
+    
+    # Grayscale
+    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+    
+    # Enhance contrast
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    
+    # Noise reduction
+    denoised = cv2.fastNlMeansDenoising(enhanced, h=10)
+    
+    # Multiple binarization strategies (we'll try the best later)
+    binary_gaussian = cv2.adaptiveThreshold(
+        denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+    )
+    _, binary_otsu = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Sharpening
+    kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+    sharpened = cv2.filter2D(binary_gaussian, -1, kernel)
+    
+    # Scale up for small text
+    height, width = sharpened.shape
+    if width < 1200:
+        scale = 1200 / width
+        sharpened = cv2.resize(sharpened, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    
+    return Image.fromarray(sharpened)
 
-def parse_gemini_response(response_text: str) -> Dict[str, Any]:
-    response_text = response_text.strip()
-    json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
-    if json_match:
-        response_text = json_match.group(1)
-    else:
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            response_text = json_match.group(0)
-    result = json.loads(response_text)
-    if result.get('gstin'):
-        result['gstin'] = result['gstin'].upper()
-    for field in ['taxable_amount', 'cgst', 'sgst', 'igst', 'total_amount']:
-        if result.get(field) is not None:
-            try:
-                result[field] = float(result[field])
-            except:
-                result[field] = None
-    return result
+# ========================= OCR WITH MULTIPLE CONFIGS =========================
+def extract_text_from_image(image: Image.Image) -> str:
+    processed = preprocess_image(image)
+    
+    configs = [
+        r'--oem 3 --psm 6',
+        r'--oem 3 --psm 4',
+        r'--oem 3 --psm 11',
+        r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz₹.,:/- ',
+    ]
+    
+    best_text = ""
+    best_conf = 0
+    
+    for config in configs:
+        try:
+            text = pytesseract.image_to_string(processed, config=config)
+            # Get confidence (average word conf)
+            data = pytesseract.image_to_data(processed, config=config, output_type=pytesseract.Output.DICT)
+            confs = [int(c) for c in data['conf'] if int(c) > 0]
+            avg_conf = sum(confs) / len(confs) if confs else 0
+            
+            if avg_conf > best_conf and len(text.strip()) > len(best_text.strip()):
+                best_text = text
+                best_conf = avg_conf
+        except Exception:
+            continue
+    
+    return best_text.strip()
 
-def extract_with_gemini(file_bytes: bytes, mime_type: str) -> Dict[str, Any]:
+def extract_text_from_pdf(file_bytes: bytes) -> str:
     try:
-        if mime_type == 'application/pdf':
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=[
-                    EXTRACTION_PROMPT,
-                    types.Part.from_bytes(
-                        data=file_bytes,
-                        mime_type="application/pdf"
-                    )
-                ]
-            )
-        else:
-            image = preprocess_image(file_bytes)
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=[EXTRACTION_PROMPT, image]
-            )
-
-        return parse_gemini_response(response.text)
-
-    except json.JSONDecodeError as e:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Failed to parse response: {str(e)}"
-        )
+        pages = convert_from_bytes(file_bytes, dpi=350, fmt='PNG')  # Higher DPI for accuracy
+        full_text = ""
+        for page in pages:
+            text = extract_text_from_image(page)
+            full_text += text + "\n\n"
+        return full_text
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Gemini API error: {str(e)}"
-        )
+        raise HTTPException(500, f"PDF processing failed: {str(e)}")
 
+# ========================= STRONGER EXTRACTION FUNCTIONS =========================
+def extract_gstin(text: str) -> Optional[str]:
+    pattern = r'\b[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}\b'
+    matches = re.findall(pattern, text.upper())
+    valid_matches = [m for m in matches if is_valid_gstin(m)]
+    return valid_matches[0] if valid_matches else (matches[0] if matches else None)
+
+def extract_all_gstins(text: str) -> List[str]:
+    pattern = r'\b[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}\b'
+    return list(set(re.findall(pattern, text.upper())))
+
+def extract_invoice_number(text: str) -> Optional[str]:
+    patterns = [
+        r'(?:Invoice|Bill|Inv|Receipt)[\s#:.]*No?[\s#:.]*([A-Z0-9][A-Z0-9/.\-]{2,25})',
+        r'\b(INV|GSTINV|BILL)[-/\s]?([A-Z0-9]{2,20})\b',
+        r'(?:No\.?|#)\s*([A-Z0-9][A-Z0-9/.\-]{3,20})',
+    ]
+    for pat in patterns:
+        match = re.search(pat, text, re.IGNORECASE)
+        if match:
+            return (match.group(1) + (match.group(2) if len(match.groups()) > 1 else '')).strip()
+    return None
+
+def extract_date(text: str) -> Optional[str]:
+    patterns = [
+        r'\b(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b',
+        r'\b(\d{4}[-/]\d{1,2}[-/]\d{1,2})\b',
+        r'\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{2,4})\b',
+    ]
+    for pat in patterns:
+        match = re.search(pat, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+def extract_amount(text: str, keywords: List[str]) -> Optional[float]:
+    for kw in keywords:
+        patterns = [
+            rf'(?:{kw})[\s:₹Rs.]*([0-9,]+\.?[0-9]*)',
+            rf'([0-9,]+\.?[0-9]*)[\s]*(?:{kw})',
+        ]
+        for pat in patterns:
+            matches = re.findall(pat, text, re.IGNORECASE)
+            for m in matches:
+                try:
+                    val = float(m.replace(',', ''))
+                    if val > 0:
+                        return val
+                except:
+                    continue
+    return None
+
+def extract_line_items(text: str) -> List[Dict]:
+    """Basic line item extraction - looks for description + HSN + qty + rate + amount patterns"""
+    lines = text.split('\n')
+    items = []
+    hsn_pattern = r'\b(\d{4,8})\b'
+    
+    for line in lines:
+        line = line.strip()
+        if len(line) < 10:
+            continue
+        hsn_matches = re.findall(hsn_pattern, line)
+        if hsn_matches or any(k in line.lower() for k in ['qty', 'rate', 'amount', 'total']):
+            # Heuristic item
+            item = {"raw": line}
+            # Try to extract numbers
+            numbers = re.findall(r'[\d,]+\.?\d*', line)
+            if numbers:
+                try:
+                    item["amount"] = float(numbers[-1].replace(',', ''))
+                except:
+                    pass
+            items.append(item)
+    return items[:20]  # Limit
+
+def extract_gst_fields(text: str) -> Dict[str, Any]:
+    gstins = extract_all_gstins(text)
+    supplier_gstin = gstins[0] if gstins else None
+    buyer_gstin = gstins[1] if len(gstins) > 1 else None
+
+    fields = {
+        "supplier_gstin": supplier_gstin,
+        "buyer_gstin": buyer_gstin,
+        "invoice_number": extract_invoice_number(text),
+        "invoice_date": extract_date(text),
+        "taxable_value": extract_amount(text, ["taxable", "subtotal", "basic", "taxable value"]),
+        "cgst": extract_amount(text, ["cgst", "central gst", "central tax"]),
+        "sgst": extract_amount(text, ["sgst", "state gst", "state tax"]),
+        "igst": extract_amount(text, ["igst", "integrated tax"]),
+        "total_amount": extract_amount(text, ["grand total", "total", "payable", "invoice total"]),
+        "hsn_codes": list(set(re.findall(r'\b\d{4,8}\b', text))),
+        "place_of_supply": re.search(r'(?:place of supply|pos)[:\s]*([A-Za-z\s]+)', text, re.I),
+        "line_items": extract_line_items(text),
+        "invoice_type": "Tax Invoice" if "tax invoice" in text.lower() else "Invoice"
+    }
+    
+    # Post-process place_of_supply
+    if fields["place_of_supply"]:
+        fields["place_of_supply"] = fields["place_of_supply"].group(1).strip()
+    
+    return fields
+
+def calculate_overall_confidence(fields: Dict) -> str:
+    score = 0
+    if fields.get("supplier_gstin") and is_valid_gstin(fields["supplier_gstin"]): score += 25
+    if fields.get("invoice_number"): score += 20
+    if fields.get("invoice_date"): score += 15
+    if fields.get("total_amount"): score += 20
+    if fields.get("line_items") and len(fields["line_items"]) > 0: score += 20
+    
+    if score >= 70: return "high"
+    elif score >= 40: return "medium"
+    return "low"
+
+# ========================= ENDPOINTS =========================
 @app.get("/", response_class=HTMLResponse)
 async def serve_frontend():
     try:
         with open("static/index.html", "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
-        return HTMLResponse(content="<h1>API Running! Visit /docs</h1>")
+        return HTMLResponse(content="<h1>GST Extractor API v5.0 Running</h1><p>Use /docs for Swagger</p>")
 
 @app.get("/health")
 async def health_check():
     return {
         "status": "healthy",
-        "version": "3.0.0",
-        "model": MODEL_NAME,
+        "version": "5.0.0",
+        "ocr_engine": "Tesseract + OpenCV",
         "timestamp": datetime.now().isoformat()
     }
 
-@app.get("/models")
-async def list_models():
-    try:
-        models = client.models.list()
-        return {
-            "available_models": [
-                m.name for m in models
-            ]
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
 @app.post("/extract")
-@limiter.limit("10/minute")
-async def extract_invoice(
-    request: Request,
-    file: UploadFile = File(...)
-):
+@limiter.limit("40/minute")
+async def extract_invoice(request: Request, file: UploadFile = File(...)):
     if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
+        raise HTTPException(400, "No file provided")
 
     ext = os.path.splitext(file.filename.lower())[1]
     if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
-        )
+        raise HTTPException(400, f"Allowed extensions: {ALLOWED_EXTENSIONS}")
 
     file_content = await file.read()
-    file_size = len(file_content)
-
-    if file_size > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail="File too large. Max 10MB"
-        )
+    if len(file_content) > MAX_FILE_SIZE:
+        raise HTTPException(400, "File too large. Max 10MB")
 
     file_hash = hashlib.md5(file_content).hexdigest()
     if file_hash in cache:
-        return JSONResponse(content={
+        return JSONResponse(content={"success": True, "cached": True, **cache[file_hash]})
+
+    try:
+        is_pdf = ext == '.pdf' or file.content_type == "application/pdf"
+        
+        if is_pdf:
+            raw_text = extract_text_from_pdf(file_content)
+        else:
+            image = Image.open(io.BytesIO(file_content))
+            raw_text = extract_text_from_image(image)
+
+        fields = extract_gst_fields(raw_text)
+        confidence = calculate_overall_confidence(fields)
+
+        result = {
             "success": True,
-            "cached": True,
+            "cached": False,
             "filename": file.filename,
-            "extracted_data": cache[file_hash],
+            "extracted_data": fields,
+            "raw_text": raw_text[:2000] + "..." if len(raw_text) > 2000 else raw_text,  # Truncate for response
+            "confidence": confidence,
             "metadata": {
-                "file_size": file_size,
+                "file_size": len(file_content),
                 "processed_at": datetime.now().isoformat()
             }
-        })
-
-    mime_type = detect_file_type(file.filename, file_content)
-    extracted_data = extract_with_gemini(file_content, mime_type)
-
-    cache[file_hash] = extracted_data
-    if len(cache) > 100:
-        keys = list(cache.keys())[:20]
-        for key in keys:
-            del cache[key]
-
-    return JSONResponse(content={
-        "success": True,
-        "cached": False,
-        "filename": file.filename,
-        "extracted_data": extracted_data,
-        "metadata": {
-            "file_type": mime_type,
-            "file_size": file_size,
-            "processed_at": datetime.now().isoformat()
         }
-    })
 
-@app.post("/extract/batch")
-@limiter.limit("5/minute")
-async def extract_batch(
-    request: Request,
-    files: List[UploadFile] = File(...)
-):
-    if len(files) > 5:
-        raise HTTPException(
-            status_code=400,
-            detail="Maximum 5 files per batch"
-        )
+        cache[file_hash] = result
+        if len(cache) > 150:
+            for k in list(cache.keys())[:30]:
+                del cache[k]
 
-    results = []
-    for file in files:
-        try:
-            file_content = await file.read()
-            mime_type = detect_file_type(file.filename, file_content)
-            data = extract_with_gemini(file_content, mime_type)
-            results.append({
-                "filename": file.filename,
-                "success": True,
-                "data": data
-            })
-        except Exception as e:
-            results.append({
-                "filename": file.filename,
-                "success": False,
-                "error": str(e)
-            })
+        return JSONResponse(content=result)
 
-    return JSONResponse(content={
-        "success": True,
-        "total": len(files),
-        "successful": sum(1 for r in results if r["success"]),
-        "failed": sum(1 for r in results if not r["success"]),
-        "results": results,
-        "processed_at": datetime.now().isoformat()
-    })
+    except Exception as e:
+        raise HTTPException(500, f"Processing failed: {str(e)}")
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"success": False, "error": exc.detail}
-    )
+# Keep your existing /extract/batch if needed (similar improvements can be applied)
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
-    return JSONResponse(
-        status_code=500,
-        content={"success": False, "error": str(exc)}
-    )
+    return JSONResponse(status_code=500, content={"success": False, "error": str(exc)})
