@@ -2,4 +2,6 @@ fastapi
 uvicorn
 Pillow
 python-multipart
-anthropic
+google-generativeai
+pdf2image
+pytesseract
