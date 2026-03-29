@@ -44,33 +44,61 @@ def home():
 async def extract_invoice(file: UploadFile = File(...)):
     try:
         contents = await file.read()
-        image = Image.open(io.BytesIO(contents))
-        buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
-        img_base64 = base64.b64encode(buffered.getvalue()).decode()
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": img_base64
+        is_pdf = file.content_type == "application/pdf" or file.filename.endswith(".pdf")
+
+        if is_pdf:
+            file_data = base64.b64encode(contents).decode()
+            message = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1500,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": file_data
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Extract all text from this Indian GST invoice PDF. Return raw text exactly as seen."
                         }
-                    },
-                    {
-                        "type": "text",
-                        "text": "Extract all text from this Indian GST invoice. Return the raw text exactly as seen."
-                    }
-                ]
-            }]
-        )
+                    ]
+                }]
+            )
+        else:
+            image = Image.open(io.BytesIO(contents))
+            buffered = io.BytesIO()
+            image.save(buffered, format="PNG")
+            img_base64 = base64.b64encode(buffered.getvalue()).decode()
+            message = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1500,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": img_base64
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Extract all text from this Indian GST invoice image. Return raw text exactly as seen."
+                        }
+                    ]
+                }]
+            )
+
         text = message.content[0].text
         gst_fields = extract_gst_fields(text)
+
         return {
             "status": "success",
             "filename": file.filename,
@@ -78,9 +106,21 @@ async def extract_invoice(file: UploadFile = File(...)):
             "raw_text": text,
             "confidence": "high" if gst_fields else "low"
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 def health():
     return {"status": "healthy", "version": "3.0"}
+```
+
+---
+
+**No extra libraries needed!**
+```
+✅ PDF → Claude reads natively
+✅ Images → Claude reads via base64
+✅ No poppler needed
+✅ No pdf2image needed
+✅ Works on free tier!
