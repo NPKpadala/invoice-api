@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("GEMINI_API_KEY not set in environment variables")
     
     genai.configure(api_key=Config.GEMINI_API_KEY)
-    app.state.model = genai.GenerativeModel(Config.GEMINI_MODEL)
+    app.state.model = genai.GenerativeModel('gemini-2.0-flash-exp')
     print(f"✅ {Config.GEMINI_MODEL} initialized successfully")
     print(f"✅ API ready on Render.com free tier")
     yield
