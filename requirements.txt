@@ -2,6 +2,8 @@ fastapi
 uvicorn
 Pillow
 python-multipart
-google-genai
+pytesseract
+pdf2image
 slowapi
-python-dotenv
+opencv-python-headless
+numpy
