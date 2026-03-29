@@ -3,3 +3,4 @@ uvicorn
 pytesseract
 Pillow
 python-multipart
+tesserocr
