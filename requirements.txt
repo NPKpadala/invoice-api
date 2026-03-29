@@ -2,4 +2,4 @@ fastapi
 uvicorn
 Pillow
 python-multipart
-easyocr
+anthropic
