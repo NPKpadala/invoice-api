@@ -113,14 +113,3 @@ async def extract_invoice(file: UploadFile = File(...)):
 @app.get("/health")
 def health():
     return {"status": "healthy", "version": "3.0"}
-```
-
----
-
-**No extra libraries needed!**
-```
-✅ PDF → Claude reads natively
-✅ Images → Claude reads via base64
-✅ No poppler needed
-✅ No pdf2image needed
-✅ Works on free tier!
