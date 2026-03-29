@@ -1,7 +1,7 @@
 import os
 import re
-import base64
 import io
+import base64
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
