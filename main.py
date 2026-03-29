@@ -2,19 +2,20 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from PIL import Image, ImageEnhance, ImageFilter
-import pytesseract
+import easyocr
 import io
 import os
 import re
 
 app = FastAPI(
     title="Indian GST Invoice Extractor",
-    description="Extract structured data from Indian GST invoices",
     version="2.0"
 )
 
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+reader = easyocr.Reader(['en'], gpu=False)
 
 def preprocess_image(image):
     image = image.convert('L')
@@ -52,14 +53,11 @@ def home():
 @app.post("/extract")
 async def extract_invoice(file: UploadFile = File(...)):
     try:
-        allowed = ['image/jpeg','image/png','image/jpg','image/tiff','image/bmp']
-        if file.content_type not in allowed:
-            raise HTTPException(status_code=400, detail="Only image files supported")
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
         processed = preprocess_image(image)
-        custom_config = r'--oem 3 --psm 6'
-        text = pytesseract.image_to_string(processed, lang='eng', config=custom_config)
+        result = reader.readtext(processed)
+        text = ' '.join([r[1] for r in result])
         gst_fields = extract_gst_fields(text)
         return {
             "status": "success",
